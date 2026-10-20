@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use openrss::{AppState, config::Config, db::Store, feeds::FeedService};
+use openrss::{AppState, config::Config, db::Store, feeds::FeedService, mcp::OpenRssMcp};
+use rmcp::ServiceExt;
 use tracing_subscriber::EnvFilter;
 
 const HELP: &str = "OpenRSS - a self-hosted RSS reader with an MCP server
 
 Usage:
-  openrss [serve]      Start the web UI and REST API
+  openrss [serve]      Start the web UI, REST API and MCP endpoint (/mcp)
+  openrss mcp          Run the MCP server over stdio (for local agents)
   openrss healthcheck  Exit 0 if the local server answers /api/health
 
 Configuration is read from environment variables; see README.md.";
@@ -26,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env();
     match command.as_str() {
         "serve" => serve(config).await,
+        "mcp" => mcp_stdio(config).await,
         "healthcheck" => healthcheck(config).await,
         "-h" | "--help" | "help" => {
             println!("{HELP}");
@@ -50,10 +53,16 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     if c.auth_password.is_none() {
         tracing::warn!("AUTH_PASSWORD is not set: the web UI and REST API are open to anyone who can reach them");
     }
+    if c.mcp_enabled && c.api_token.is_none() && c.auth_password.is_none() {
+        tracing::warn!("API_TOKEN is not set: the MCP endpoint is unauthenticated");
+    }
     tokio::spawn(openrss::run_scheduler(state.clone()));
 
     let listener = tokio::net::TcpListener::bind(&c.bind).await.with_context(|| format!("binding {}", c.bind))?;
     tracing::info!("OpenRSS listening on http://{}", listener.local_addr()?);
+    if c.mcp_enabled {
+        tracing::info!("MCP endpoint available at /mcp");
+    }
     axum::serve(listener, openrss::app(state.clone()))
         .with_graceful_shutdown(shutdown_signal())
         .await?;
@@ -81,6 +90,13 @@ async fn shutdown_signal() {
         _ = term => {},
     }
     tracing::info!("shutting down");
+}
+
+async fn mcp_stdio(config: Config) -> anyhow::Result<()> {
+    let svc = open_service(&config)?;
+    let server = OpenRssMcp::new(svc).serve(rmcp::transport::stdio()).await?;
+    server.waiting().await?;
+    Ok(())
 }
 
 async fn healthcheck(config: Config) -> anyhow::Result<()> {

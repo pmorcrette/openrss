@@ -4,12 +4,16 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod feeds;
+pub mod mcp;
 pub mod opml;
 pub mod web;
 
 use std::{sync::Arc, time::Duration};
 
 use axum::{Router, middleware};
+use rmcp::transport::streamable_http_server::{
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+};
 use tower_http::{compression::CompressionLayer, trace::TraceLayer};
 
 use crate::{config::Config, feeds::FeedService};
@@ -20,13 +24,35 @@ pub struct AppState {
     pub config: Arc<Config>,
 }
 
-/// Builds the whole HTTP application: web UI and REST API.
+/// Builds the whole HTTP application: web UI, REST API and MCP endpoint.
 pub fn app(state: AppState) -> Router {
-    let router = Router::new()
+    let mut router = Router::new()
         .nest("/api", api::router())
         .fallback(web::static_handler)
         .layer(middleware::from_fn_with_state(state.clone(), auth::require_user))
         .layer(CompressionLayer::new());
+
+    if state.config.mcp_enabled {
+        let svc = state.svc.clone();
+        let mut mcp_config = StreamableHttpServerConfig::default();
+        // Stateless mode: every request is self-contained, so restarts never break agents.
+        mcp_config.legacy_session_mode = false;
+        mcp_config.json_response = true;
+        mcp_config = if state.config.mcp_allowed_hosts.is_empty() {
+            mcp_config.disable_allowed_hosts()
+        } else {
+            mcp_config.with_allowed_hosts(state.config.mcp_allowed_hosts.clone())
+        };
+        let mcp = StreamableHttpService::<_, LocalSessionManager>::new(
+            move || Ok(mcp::OpenRssMcp::new(svc.clone())),
+            Default::default(),
+            mcp_config,
+        );
+        let mcp_router = Router::new()
+            .nest_service("/mcp", mcp)
+            .layer(middleware::from_fn_with_state(state.clone(), auth::require_agent));
+        router = mcp_router.merge(router);
+    }
 
     router.layer(TraceLayer::new_for_http()).with_state(state)
 }
