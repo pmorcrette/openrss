@@ -238,6 +238,61 @@ impl FeedService {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportFailure {
+    pub url: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImportSummary {
+    pub found: usize,
+    pub imported: usize,
+    pub already_subscribed: usize,
+    pub failed: Vec<ImportFailure>,
+}
+
+impl FeedService {
+    /// Subscribes to every feed in an OPML document, keeping its folders.
+    pub async fn import_opml(&self, xml: &str) -> AppResult<ImportSummary> {
+        let entries = crate::opml::parse(xml)?;
+        let found = entries.len();
+        let mut already = 0;
+        let mut todo = Vec::new();
+        for e in entries {
+            match normalize_url(&e.url) {
+                Ok(u) if self.store.find_feed_by_url(&u)?.is_some() => already += 1,
+                _ => todo.push(e),
+            }
+        }
+        let outcomes: Vec<(String, AppResult<()>)> = stream::iter(todo)
+            .map(|e| async move {
+                let r = async {
+                    let (feed, _) = self.add_feed(&e.url, e.category.as_deref(), None).await?;
+                    // Keep a renamed subscription's name from the OPML file.
+                    if let Some(t) = e.title.filter(|t| *t != feed.title) {
+                        self.store.update_feed(feed.id, crate::db::FeedUpdate { title: Some(t), ..Default::default() })?;
+                    }
+                    Ok(())
+                }
+                .await;
+                (e.url, r)
+            })
+            .buffer_unordered(self.concurrency)
+            .collect()
+            .await;
+        let mut summary = ImportSummary { found, imported: 0, already_subscribed: already, failed: Vec::new() };
+        for (url, r) in outcomes {
+            match r {
+                Ok(()) => summary.imported += 1,
+                Err(e) if e.status == reqwest::StatusCode::CONFLICT => summary.already_subscribed += 1,
+                Err(e) => summary.failed.push(ImportFailure { url, error: e.message }),
+            }
+        }
+        Ok(summary)
+    }
+}
+
 fn describe_reqwest_error(e: &reqwest::Error) -> String {
     let mut msg = e.to_string();
     let mut source = std::error::Error::source(e);
@@ -463,12 +518,13 @@ pub fn plain_text(html: &str) -> String {
     if !html.contains('<') && !html.contains('&') {
         return html.split_whitespace().collect::<Vec<_>>().join(" ");
     }
-    let frag = Html::parse_fragment(html);
-    let mut out = String::with_capacity(html.len() / 2);
-    for t in frag.root_element().text() {
-        out.push_str(t);
-        out.push(' ');
-    }
+    // Separate block elements with a space, but keep inline text (e.g. "<b>a</b>.") joined.
+    static BLOCK: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)<(/?(p|div|br|li|ul|ol|h[1-6]|tr|td|th|blockquote|pre|figure|figcaption|section|article|hr)\b)").unwrap()
+    });
+    let spaced = BLOCK.replace_all(html, " <$1");
+    let frag = Html::parse_fragment(&spaced);
+    let out: String = frag.root_element().text().collect();
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -521,6 +577,8 @@ mod tests {
         let a = &items[0];
         assert_eq!(a.guid, "h1");
         assert_eq!(a.title, "Hello world");
+        assert_eq!(a.text, "Hi more");
+        assert_eq!(plain_text("<p>One <b>two</b>.</p><p>Three</p>"), "One two. Three");
         assert_eq!(a.published_at.as_deref(), Some("2026-01-05T10:00:00.000Z"));
         assert!(!a.content.contains("script") && !a.content.contains("onclick"));
         assert!(a.content.contains(r#"src="https://example.com/pic.jpg""#), "{}", a.content);

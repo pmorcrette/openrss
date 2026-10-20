@@ -10,7 +10,9 @@ edition = "2024"
 ammonia = "4.2.4"
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["macros"] }
+base64 = "0.23.1"
 chrono = { version = "0.4.45", features = ["serde"] }
+ego-tree = "0.11"
 feed-rs = "3.0.0"
 futures = "0.3.34"
 mime_guess = "2.0.5"
