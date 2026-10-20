@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{io::IsTerminal, sync::Arc};
 
 use anyhow::Context;
 use openrss::{AppState, config::Config, db::Store, feeds::FeedService, mcp::OpenRssMcp};
@@ -19,10 +19,12 @@ async fn main() -> anyhow::Result<()> {
     let command = std::env::args().nth(1).unwrap_or_else(|| "serve".into());
     let stdio = command == "mcp";
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_env("LOG_LEVEL").unwrap_or_else(|_| EnvFilter::new("info,tower_http=warn")))
+        .with_env_filter(
+            EnvFilter::try_from_env("LOG_LEVEL").unwrap_or_else(|_| EnvFilter::new("info,tower_http=warn")),
+        )
         // stdout carries the MCP protocol in stdio mode, so log to stderr.
         .with_writer(std::io::stderr)
-        .with_ansi(!stdio)
+        .with_ansi(!stdio && std::io::stderr().is_terminal())
         .init();
 
     let config = Config::from_env();
@@ -43,7 +45,8 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn open_service(config: &Config) -> anyhow::Result<FeedService> {
-    let store = Store::open(&config.db_path()).with_context(|| format!("opening database {}", config.db_path().display()))?;
+    let store =
+        Store::open(&config.db_path()).with_context(|| format!("opening database {}", config.db_path().display()))?;
     FeedService::new(store, config)
 }
 
@@ -63,9 +66,7 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     if c.mcp_enabled {
         tracing::info!("MCP endpoint available at /mcp");
     }
-    axum::serve(listener, openrss::app(state.clone()))
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(listener, openrss::app(state.clone())).with_graceful_shutdown(shutdown_signal()).await?;
     Ok(())
 }
 

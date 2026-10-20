@@ -1014,7 +1014,7 @@ function agentsTab(body) {
     h('div', { class: 'section-title' }, 'Other MCP clients (JSON config)'),
     codeBlock(JSON.stringify(json, null, 2)),
     h('div', { class: 'section-title' }, 'Local stdio (inside the container)'),
-    codeBlock('docker exec -i openrss openrss mcp'),
+    codeBlock('docker exec -i openrss /openrss mcp'),
     h('div', { class: 'section-title' }, 'Things to ask your agent'),
     h('ul', { class: 'muted' },
       h('li', {}, '“Subscribe me to the Rust and Go blogs in a Programming category.”'),
