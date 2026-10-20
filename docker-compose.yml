@@ -1,0 +1,21 @@
+services:
+  openrss:
+    build: .
+    image: openrss:latest
+    container_name: openrss
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - openrss-data:/data
+    environment:
+      # Protect the web UI and REST API (user defaults to "admin").
+      # AUTH_PASSWORD: change-me
+      # Bearer token required by AI agents on /mcp. Generate one with: openssl rand -hex 32
+      # API_TOKEN: change-me-too
+      REFRESH_INTERVAL: "30"   # minutes between feed refreshes
+      RETENTION_DAYS: "60"     # keep read, unstarred articles this long (0 = forever)
+      TZ: UTC
+
+volumes:
+  openrss-data:
