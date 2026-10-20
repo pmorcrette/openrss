@@ -20,6 +20,7 @@ use crate::{
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
+        .route("/info", get(info))
         .route("/stats", get(stats))
         .route("/categories", get(list_categories).post(create_category))
         .route("/categories/{id}", axum::routing::patch(update_category).delete(delete_category))
@@ -54,6 +55,18 @@ fn category_filter(raw: Option<&str>) -> AppResult<Option<CategoryFilter>> {
             .map(|id| Some(CategoryFilter::Id(id)))
             .map_err(|_| AppError::bad_request("category must be an id or \"none\"")),
     }
+}
+
+/// What the UI needs to explain how to connect agents.
+async fn info(State(s): State<AppState>) -> impl IntoResponse {
+    let c = &s.config;
+    Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "mcp_enabled": c.mcp_enabled,
+        "mcp_requires_token": c.api_token.is_some(),
+        "auth_enabled": c.auth_password.is_some(),
+        "refresh_interval_minutes": c.refresh_interval.as_secs() / 60,
+    }))
 }
 
 async fn stats(State(s): State<AppState>) -> AppResult<impl IntoResponse> {

@@ -1,0 +1,10 @@
+{
+  "name": "OpenRSS",
+  "short_name": "OpenRSS",
+  "description": "A beautiful, self-hosted RSS reader",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f6f3",
+  "theme_color": "#efefeb",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
