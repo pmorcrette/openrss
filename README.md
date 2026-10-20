@@ -38,6 +38,19 @@ git clone https://github.com/pmorcrette/openrss && cd openrss
 docker compose up -d --build     # edit docker-compose.yml to set AUTH_PASSWORD and API_TOKEN
 ```
 
+### Without Docker
+
+OpenRSS is a single self-contained binary: the web UI is built in and SQLite is bundled. Download the
+archive for your platform from the [latest release](https://github.com/pmorcrette/openrss/releases/latest)
+(Linux x86_64/arm64 static builds, macOS Apple Silicon/Intel, Windows x86_64), then run it:
+
+```sh
+tar -xzf openrss-v*-x86_64-unknown-linux-musl.tar.gz && cd openrss-v*/
+AUTH_PASSWORD=change-me API_TOKEN=change-me-too DATA_DIR=./data ./openrss
+```
+
+`SHA256SUMS` in each release lets you verify the download (`sha256sum -c SHA256SUMS --ignore-missing`).
+
 ## Configuration
 
 Everything is configured with environment variables:
@@ -210,6 +223,19 @@ src/
   web.rs      embedded static files
 public/       web UI (HTML, CSS, JS)
 ```
+
+## Releasing
+
+Bump `version` in `Cargo.toml` on `master`, then push a matching tag:
+
+```sh
+git tag v1.1.0 && git push origin v1.1.0
+```
+
+The release workflow checks that the tag is on `master` and matches `Cargo.toml`. It then builds the
+binaries, publishes them with checksums as a GitHub Release, and the Docker workflow pushes the
+`1.1.0` and `1.1` image tags. Run the release workflow manually from the Actions tab to try the builds
+without publishing.
 
 ## License
 
