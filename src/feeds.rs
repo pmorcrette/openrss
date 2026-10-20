@@ -153,6 +153,7 @@ impl FeedService {
         };
         let parsed = match parse_feed(&fetched.body, &fetched.final_url) {
             Ok(p) => p,
+            Err(parse_err) if looks_like_feed_document(&fetched.body) => return Err(parse_err),
             Err(parse_err) => {
                 // Not a feed: treat it as a web page and follow its advertised feed.
                 let html = String::from_utf8_lossy(&fetched.body).into_owned();
@@ -365,7 +366,15 @@ pub fn discover_in_html(html: &str, base: &str) -> Vec<DiscoveredFeed> {
 /// Parses RSS 0.9x/1.0/2.0, Atom or JSON Feed into normalized, sanitized entries.
 pub fn parse_feed(body: &[u8], url: &str) -> AppResult<(FeedMeta, Vec<NewArticle>)> {
     let parser = feed_rs::parser::Builder::new().base_uri(Some(url)).build();
-    let feed = parser.parse(body).map_err(|e| AppError::bad_request(format!("Not a valid feed: {e}")))?;
+    let feed = match parser.parse(body) {
+        Ok(f) => f,
+        // Many real-world feeds contain unescaped ampersands; repair and retry once.
+        Err(e) => match escape_bare_ampersands(body) {
+            Some(fixed) => parser.parse(fixed.as_bytes()),
+            None => Err(e),
+        }
+        .map_err(|e| AppError::bad_request(format!("Not a valid feed: {e}")))?,
+    };
 
     let site_url = feed
         .links
@@ -443,6 +452,33 @@ pub fn parse_feed(body: &[u8], url: &str) -> AppResult<(FeedMeta, Vec<NewArticle
         })
         .collect();
     Ok((meta, items))
+}
+
+/// Replaces `&` that does not start an entity with `&amp;`. Returns `None` if nothing changed.
+fn escape_bare_ampersands(body: &[u8]) -> Option<String> {
+    static BARE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"&([^&;\s]{0,12})(;?)").unwrap());
+    let text = std::str::from_utf8(body).ok()?;
+    let mut changed = false;
+    let fixed = BARE.replace_all(text, |c: &regex::Captures| {
+        let name = &c[1];
+        let is_entity = &c[2] == ";"
+            && (name.starts_with('#') || (!name.is_empty() && name.chars().all(|ch| ch.is_ascii_alphanumeric())));
+        if is_entity {
+            c[0].to_string()
+        } else {
+            changed = true;
+            format!("&amp;{name}{}", &c[2])
+        }
+    });
+    changed.then(|| fixed.into_owned())
+}
+
+/// True when a response is plainly meant to be a feed (so a parse failure is the real error).
+fn looks_like_feed_document(body: &[u8]) -> bool {
+    let head = String::from_utf8_lossy(&body[..body.len().min(1024)]).to_lowercase();
+    let head = head.trim_start_matches('\u{feff}').trim_start();
+    head.contains("<rss") || head.contains("<feed") || head.contains("<rdf:rdf") || head.contains("jsonfeed.org")
 }
 
 fn looks_like_feed_link(l: &feed_rs::model::Link) -> bool {
@@ -602,6 +638,18 @@ mod tests {
         let (meta, items) = parse_feed(json.as_bytes(), "https://j.example/feed.json").unwrap();
         assert_eq!(meta.title, "J");
         assert_eq!(items[0].title, "Plain text", "untitled items fall back to their text");
+    }
+
+    #[test]
+    fn repairs_unescaped_ampersands() {
+        let rss = r#"<?xml version="1.0"?><rss version="2.0"><channel><title>Pixel & Ink</title>
+<link>https://p.example/?a=1&b=2</link><item><title>Fish &amp; chips &copy; &#169; R&D</title><guid>1</guid></item></channel></rss>"#;
+        let (meta, items) = parse_feed(rss.as_bytes(), "https://p.example/feed").unwrap();
+        assert_eq!(meta.title, "Pixel & Ink");
+        assert_eq!(meta.site_url.as_deref(), Some("https://p.example/?a=1&b=2"));
+        assert_eq!(items[0].title, "Fish & chips © © R&D");
+        assert!(looks_like_feed_document(rss.as_bytes()));
+        assert!(!looks_like_feed_document(b"<!doctype html><html></html>"));
     }
 
     #[test]
