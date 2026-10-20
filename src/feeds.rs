@@ -116,8 +116,18 @@ impl FeedService {
     /// Finds feeds for a URL: the URL itself if it is a feed, the feeds an HTML
     /// page advertises, or feeds at common locations.
     pub async fn discover(&self, input: &str) -> AppResult<Vec<DiscoveredFeed>> {
-        let url = normalize_url(input)?;
-        let FetchOutcome::Body(page) = self.fetch(&url, None, None).await? else {
+        let mut candidates = candidate_urls(input)?.into_iter().peekable();
+        loop {
+            let url = candidates.next().expect("at least one candidate");
+            match self.discover_url(&url).await {
+                Err(e) if e.status == StatusCode::BAD_GATEWAY && candidates.peek().is_some() => continue,
+                r => return r,
+            }
+        }
+    }
+
+    async fn discover_url(&self, url: &str) -> AppResult<Vec<DiscoveredFeed>> {
+        let FetchOutcome::Body(page) = self.fetch(url, None, None).await? else {
             return Err(AppError::bad_gateway("Unexpected 304 response"));
         };
         if let Ok((meta, _)) = parse_feed(&page.body, &page.final_url) {
@@ -144,7 +154,18 @@ impl FeedService {
 
     /// Subscribes to a feed (with auto-discovery) and imports its current entries.
     pub async fn add_feed(&self, input: &str, category: Option<&str>, title: Option<&str>) -> AppResult<(Feed, UpsertCounts)> {
-        let url = normalize_url(input)?;
+        let mut candidates = candidate_urls(input)?.into_iter().peekable();
+        loop {
+            let url = candidates.next().expect("at least one candidate");
+            match self.add_feed_url(&url, category, title).await {
+                Err(e) if e.status == StatusCode::BAD_GATEWAY && candidates.peek().is_some() => continue,
+                r => return r,
+            }
+        }
+    }
+
+    async fn add_feed_url(&self, url: &str, category: Option<&str>, title: Option<&str>) -> AppResult<(Feed, UpsertCounts)> {
+        let url = url.to_string();
         if let Some(existing) = self.store.find_feed_by_url(&url)? {
             return Err(AppError::conflict(format!("Already subscribed to {} (feed {})", existing.url, existing.id)));
         }
@@ -158,8 +179,8 @@ impl FeedService {
                 // Not a feed: treat it as a web page and follow its advertised feed.
                 let html = String::from_utf8_lossy(&fetched.body).into_owned();
                 let Some(found) = discover_in_html(&html, &fetched.final_url).into_iter().next() else {
-                    let discovered = self.discover(&url).await.map_err(|_| parse_err)?;
-                    return Box::pin(self.add_feed(&discovered[0].url, category, title)).await;
+                    let discovered = self.discover_url(&url).await.map_err(|_| parse_err)?;
+                    return Box::pin(self.add_feed_url(&discovered[0].url, category, title)).await;
                 };
                 let FetchOutcome::Body(f) = self.fetch(&found.url, None, None).await? else {
                     return Err(AppError::bad_gateway("Unexpected 304 response"));
@@ -309,6 +330,18 @@ fn non_empty(s: String) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
+/// URLs to try for user input: a scheme-less address is tried over HTTPS, then HTTP.
+fn candidate_urls(input: &str) -> AppResult<Vec<String>> {
+    let primary = normalize_url(input)?;
+    let trimmed = input.trim();
+    let explicit = trimmed.contains("://") || trimmed.starts_with("feed:");
+    let mut out = vec![primary.clone()];
+    if !explicit {
+        out.push(primary.replacen("https://", "http://", 1));
+    }
+    Ok(out)
+}
+
 /// Accepts bare domains ("example.com") and `feed://` URLs.
 pub fn normalize_url(input: &str) -> AppResult<String> {
     let s = input.trim();
@@ -436,7 +469,7 @@ pub fn parse_feed(body: &[u8], url: &str) -> AppResult<(FeedMeta, Vec<NewArticle
                     })
                 })
                 .or_else(|| first_image(&content));
-            let author = e.authors.iter().filter_map(|a| a.name.clone()).map(|n| plain_text(&n)).find(|n| !n.is_empty());
+            let author = e.authors.iter().filter_map(|a| a.name.as_deref()).map(clean_author).find(|n| !n.is_empty());
             let published = e.published.or(e.updated).map(|d| d.min(chrono::Utc::now())).map(format_time);
             NewArticle {
                 guid: if e.id.is_empty() { link.clone().unwrap_or_else(|| title.clone()) } else { e.id },
@@ -479,6 +512,15 @@ fn looks_like_feed_document(body: &[u8]) -> bool {
     let head = String::from_utf8_lossy(&body[..body.len().min(1024)]).to_lowercase();
     let head = head.trim_start_matches('\u{feff}').trim_start();
     head.contains("<rss") || head.contains("<feed") || head.contains("<rdf:rdf") || head.contains("jsonfeed.org")
+}
+
+/// RSS authors are often "email (Name)"; keep just the name.
+fn clean_author(raw: &str) -> String {
+    let text = plain_text(raw);
+    match (text.find('('), text.ends_with(')')) {
+        (Some(i), true) => text[i + 1..text.len() - 1].trim().to_string(),
+        _ => text,
+    }
 }
 
 fn looks_like_feed_link(l: &feed_rs::model::Link) -> bool {
@@ -666,9 +708,14 @@ mod tests {
 
     #[test]
     fn normalizes_urls() {
+        assert_eq!(clean_author("jane@example.com (Jane Doe)"), "Jane Doe");
+        assert_eq!(clean_author("(Jane Doe)"), "Jane Doe");
+        assert_eq!(clean_author("Jane Doe"), "Jane Doe");
         assert_eq!(normalize_url("example.com").unwrap(), "https://example.com/");
         assert_eq!(normalize_url("feed://example.com/rss").unwrap(), "https://example.com/rss");
         assert!(normalize_url("ftp://example.com").is_err());
+        assert_eq!(candidate_urls("example.com").unwrap(), ["https://example.com/", "http://example.com/"]);
+        assert_eq!(candidate_urls("https://example.com").unwrap(), ["https://example.com/"]);
         assert_eq!(truncate("hello brave new world", 12), "hello brave…");
     }
 }
