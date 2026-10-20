@@ -32,3 +32,8 @@ tower-http = { version = "0.7.1", features = ["trace", "compression-gzip", "set-
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
