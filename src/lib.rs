@@ -14,7 +14,10 @@ use axum::{Router, middleware};
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
-use tower_http::{compression::CompressionLayer, trace::TraceLayer};
+use tower_http::{
+    compression::CompressionLayer,
+    trace::{DefaultOnFailure, TraceLayer},
+};
 
 use crate::{config::Config, feeds::FeedService};
 
@@ -54,7 +57,9 @@ pub fn app(state: AppState) -> Router {
         router = mcp_router.merge(router);
     }
 
-    router.layer(TraceLayer::new_for_http()).with_state(state)
+    // Upstream feed failures surface as 502s; they are not server errors worth logging loudly.
+    let trace = TraceLayer::new_for_http().on_failure(DefaultOnFailure::new().level(tracing::Level::DEBUG));
+    router.layer(trace).with_state(state)
 }
 
 /// Periodically refreshes every feed and prunes old articles.
