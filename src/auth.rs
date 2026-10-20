@@ -25,10 +25,8 @@ fn bearer_ok(headers: &HeaderMap, token: Option<&str>) -> bool {
 
 fn basic_ok(headers: &HeaderMap, user: &str, password: Option<&str>) -> bool {
     let Some(password) = password else { return false };
-    let Some(encoded) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Basic "))
+    let Some(encoded) =
+        headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Basic "))
     else {
         return false;
     };
@@ -40,7 +38,8 @@ fn basic_ok(headers: &HeaderMap, user: &str, password: Option<&str>) -> bool {
 fn unauthorized(basic: bool) -> Response {
     let mut res = (StatusCode::UNAUTHORIZED, "Authentication required").into_response();
     if basic {
-        res.headers_mut().insert(header::WWW_AUTHENTICATE, "Basic realm=\"OpenRSS\", charset=\"UTF-8\"".parse().unwrap());
+        res.headers_mut()
+            .insert(header::WWW_AUTHENTICATE, "Basic realm=\"OpenRSS\", charset=\"UTF-8\"".parse().unwrap());
     }
     res
 }

@@ -188,7 +188,8 @@ impl OpenRssMcp {
 
     #[tool(description = "List subscribed feeds with full details.", annotations(read_only_hint = true))]
     async fn list_feeds(&self, Parameters(a): Parameters<ListFeedsArgs>) -> ToolResult {
-        let filter = if a.uncategorized { Some(CategoryFilter::Uncategorized) } else { a.category_id.map(CategoryFilter::Id) };
+        let filter =
+            if a.uncategorized { Some(CategoryFilter::Uncategorized) } else { a.category_id.map(CategoryFilter::Id) };
         ok(self.svc.store.list_feeds(filter)?)
     }
 
@@ -209,7 +210,10 @@ impl OpenRssMcp {
         ok(self.svc.discover(&a.url).await?)
     }
 
-    #[tool(description = "Rename a feed, move it to another category, or change its URL.", annotations(idempotent_hint = true))]
+    #[tool(
+        description = "Rename a feed, move it to another category, or change its URL.",
+        annotations(idempotent_hint = true)
+    )]
     async fn update_feed(&self, Parameters(a): Parameters<UpdateFeedArgs>) -> ToolResult {
         let store = &self.svc.store;
         let category_id = match a.category {
@@ -220,7 +224,10 @@ impl OpenRssMcp {
         ok(store.update_feed(a.feed_id, FeedUpdate { title: a.title, category_id, url })?)
     }
 
-    #[tool(description = "Unsubscribe from a feed and delete its articles (including starred ones).", annotations(destructive_hint = true))]
+    #[tool(
+        description = "Unsubscribe from a feed and delete its articles (including starred ones).",
+        annotations(destructive_hint = true)
+    )]
     async fn remove_feed(&self, Parameters(a): Parameters<FeedIdArgs>) -> ToolResult {
         let feed = self.svc.store.get_feed(a.feed_id)?;
         self.svc.store.delete_feed(a.feed_id)?;
@@ -240,7 +247,10 @@ impl OpenRssMcp {
         ok(self.svc.store.list_categories()?)
     }
 
-    #[tool(description = "Create a category (returns the existing one if the name is taken).", annotations(idempotent_hint = true))]
+    #[tool(
+        description = "Create a category (returns the existing one if the name is taken).",
+        annotations(idempotent_hint = true)
+    )]
     async fn create_category(&self, Parameters(a): Parameters<NameArgs>) -> ToolResult {
         ok(self.svc.store.create_category(&a.name)?)
     }
@@ -250,7 +260,10 @@ impl OpenRssMcp {
         ok(self.svc.store.update_category(a.category_id, Some(&a.name), None)?)
     }
 
-    #[tool(description = "Delete a category. Its feeds are kept and become uncategorized.", annotations(destructive_hint = true))]
+    #[tool(
+        description = "Delete a category. Its feeds are kept and become uncategorized.",
+        annotations(destructive_hint = true)
+    )]
     async fn delete_category(&self, Parameters(a): Parameters<CategoryIdArgs>) -> ToolResult {
         self.svc.store.delete_category(a.category_id)?;
         ok(json!({ "deleted": a.category_id }))
@@ -285,13 +298,17 @@ impl OpenRssMcp {
         ok(json!({ "total": page.total, "offset": page.offset, "returned": articles.len(), "articles": articles }))
     }
 
-    #[tool(description = "Read one article in full, as Markdown (default) or sanitized HTML.", annotations(idempotent_hint = true))]
+    #[tool(
+        description = "Read one article in full, as Markdown (default) or sanitized HTML.",
+        annotations(idempotent_hint = true)
+    )]
     async fn get_article(&self, Parameters(a): Parameters<GetArticleArgs>) -> ToolResult {
         if a.mark_read {
             self.svc.store.set_article_flags(&[a.article_id], Some(true), None)?;
         }
         let art = self.svc.store.get_article(a.article_id)?;
-        let body = if a.format.as_deref() == Some("html") { art.content.clone() } else { html_to_markdown(&art.content) };
+        let body =
+            if a.format.as_deref() == Some("html") { art.content.clone() } else { html_to_markdown(&art.content) };
         let m = art.meta;
         ok(json!({
             "id": m.id, "title": m.title, "feed": m.feed_title, "feed_id": m.feed_id, "url": m.url,
@@ -309,13 +326,19 @@ impl OpenRssMcp {
         ok(json!({ "updated": n }))
     }
 
-    #[tool(description = "Mark all unread articles as read, optionally limited to a feed, category or date.", annotations(idempotent_hint = true))]
+    #[tool(
+        description = "Mark all unread articles as read, optionally limited to a feed, category or date.",
+        annotations(idempotent_hint = true)
+    )]
     async fn mark_all_read(&self, Parameters(a): Parameters<MarkAllReadArgs>) -> ToolResult {
         let n = self.svc.store.mark_all_read(a.feed_id, a.category_id.map(CategoryFilter::Id), a.before.as_deref())?;
         ok(json!({ "updated": n }))
     }
 
-    #[tool(description = "Subscribe to every feed in an OPML document, keeping its folders as categories.", annotations(open_world_hint = true))]
+    #[tool(
+        description = "Subscribe to every feed in an OPML document, keeping its folders as categories.",
+        annotations(open_world_hint = true)
+    )]
     async fn import_opml(&self, Parameters(a): Parameters<ImportOpmlArgs>) -> ToolResult {
         ok(self.svc.import_opml(&a.opml).await?)
     }
@@ -390,7 +413,9 @@ fn walk(node: NodeRef<Node>, out: &mut String, depth: usize) {
                     "a" => {
                         let text = inline_text(child);
                         match el.attr("href") {
-                            Some(href) if !text.is_empty() && !href.starts_with('#') => out.push_str(&format!("[{text}]({href})")),
+                            Some(href) if !text.is_empty() && !href.starts_with('#') => {
+                                out.push_str(&format!("[{text}]({href})"))
+                            }
                             _ => out.push_str(&text),
                         }
                     }
@@ -401,11 +426,17 @@ fn walk(node: NodeRef<Node>, out: &mut String, depth: usize) {
                     }
                     "strong" | "b" => out.push_str(&format!("**{}**", inline_text(child))),
                     "em" | "i" => out.push_str(&format!("*{}*", inline_text(child))),
-                    "code" if !matches!(child.parent().and_then(|p| p.value().as_element().map(|e| e.name() == "pre")), Some(true)) => {
+                    "code"
+                        if !matches!(
+                            child.parent().and_then(|p| p.value().as_element().map(|e| e.name() == "pre")),
+                            Some(true)
+                        ) =>
+                    {
                         out.push_str(&format!("`{}`", inline_text(child)));
                     }
                     "pre" => {
-                        let code: String = scraper::ElementRef::wrap(child).map(|e| e.text().collect()).unwrap_or_default();
+                        let code: String =
+                            scraper::ElementRef::wrap(child).map(|e| e.text().collect()).unwrap_or_default();
                         out.push_str(&format!("\n\n```\n{}\n```\n\n", code.trim_end()));
                     }
                     "li" => {
@@ -423,8 +454,8 @@ fn walk(node: NodeRef<Node>, out: &mut String, depth: usize) {
                         let quoted: Vec<String> = inner.trim().lines().map(|l| format!("> {}", l.trim())).collect();
                         out.push_str(&format!("\n\n{}\n\n", quoted.join("\n")));
                     }
-                    "p" | "div" | "section" | "article" | "figure" | "figcaption" | "table" | "tr" | "header" | "footer"
-                    | "aside" | "details" | "summary" | "main" | "nav" => {
+                    "p" | "div" | "section" | "article" | "figure" | "figcaption" | "table" | "tr" | "header"
+                    | "footer" | "aside" | "details" | "summary" | "main" | "nav" => {
                         out.push_str("\n\n");
                         walk(child, out, depth);
                         out.push_str("\n\n");
@@ -450,6 +481,9 @@ mod tests {
         let html = r#"<h2>Title</h2><p>Some <strong>bold</strong> and a <a href="https://x.y/">link</a>.</p>
             <ul><li>one</li><li>two</li></ul><pre><code>let x = 1;</code></pre><blockquote><p>quote</p></blockquote>"#;
         let md = html_to_markdown(html);
-        assert_eq!(md, "## Title\n\nSome **bold** and a [link](https://x.y/).\n\n- one\n- two\n\n```\nlet x = 1;\n```\n\n> quote");
+        assert_eq!(
+            md,
+            "## Title\n\nSome **bold** and a [link](https://x.y/).\n\n- one\n- two\n\n```\nlet x = 1;\n```\n\n> quote"
+        );
     }
 }

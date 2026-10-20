@@ -50,10 +50,8 @@ pub fn parse(xml: &str) -> AppResult<Vec<OpmlFeed>> {
         let mut text = None;
         let mut title = None;
         for attr in e.attributes().flatten() {
-            let value = attr
-                .normalized_value(XmlVersion::Implicit1_0)
-                .map(|v| v.trim().to_string())
-                .unwrap_or_default();
+            let value =
+                attr.normalized_value(XmlVersion::Implicit1_0).map(|v| v.trim().to_string()).unwrap_or_default();
             if value.is_empty() {
                 continue;
             }
@@ -86,7 +84,8 @@ pub fn parse(xml: &str) -> AppResult<Vec<OpmlFeed>> {
 pub fn export(feeds: &[Feed], categories: &[Category]) -> String {
     let outline = |f: &Feed, indent: &str| {
         let title = html_escape(&f.title);
-        let mut line = format!(r#"{indent}<outline type="rss" text="{title}" title="{title}" xmlUrl="{}""#, html_escape(&f.url));
+        let mut line =
+            format!(r#"{indent}<outline type="rss" text="{title}" title="{title}" xmlUrl="{}""#, html_escape(&f.url));
         if let Some(site) = &f.site_url {
             line.push_str(&format!(r#" htmlUrl="{}""#, html_escape(site)));
         }
@@ -129,8 +128,16 @@ mod tests {
         assert_eq!(
             feeds,
             vec![
-                OpmlFeed { url: "https://blog.rust-lang.org/feed.xml".into(), title: Some("Rust".into()), category: Some("Tech".into()) },
-                OpmlFeed { url: "https://news.ycombinator.com/rss".into(), title: Some("HN".into()), category: Some("Tech".into()) },
+                OpmlFeed {
+                    url: "https://blog.rust-lang.org/feed.xml".into(),
+                    title: Some("Rust".into()),
+                    category: Some("Tech".into())
+                },
+                OpmlFeed {
+                    url: "https://news.ycombinator.com/rss".into(),
+                    title: Some("HN".into()),
+                    category: Some("Tech".into())
+                },
                 OpmlFeed { url: "https://example.com/feed".into(), title: Some("Loose & free".into()), category: None },
             ]
         );

@@ -18,7 +18,8 @@ pub async fn static_handler(uri: Uri, headers: HeaderMap) -> Response {
         None if !path.contains('.') => ("index.html", Assets::get("index.html").expect("index.html is embedded")),
         None => return (StatusCode::NOT_FOUND, "Not found").into_response(),
     };
-    let etag = format!("\"{}\"", file.metadata.sha256_hash().iter().take(12).map(|b| format!("{b:02x}")).collect::<String>());
+    let etag =
+        format!("\"{}\"", file.metadata.sha256_hash().iter().take(12).map(|b| format!("{b:02x}")).collect::<String>());
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
         return StatusCode::NOT_MODIFIED.into_response();
     }

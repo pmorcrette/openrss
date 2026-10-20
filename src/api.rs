@@ -90,7 +90,11 @@ async fn create_category(State(s): State<AppState>, Json(b): Json<CategoryBody>)
     Ok((StatusCode::CREATED, Json(cat)))
 }
 
-async fn update_category(State(s): State<AppState>, Path(id): Path<i64>, Json(b): Json<CategoryBody>) -> AppResult<impl IntoResponse> {
+async fn update_category(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    Json(b): Json<CategoryBody>,
+) -> AppResult<impl IntoResponse> {
     Ok(Json(s.svc.store.update_category(id, b.name.as_deref(), b.position)?))
 }
 
@@ -136,7 +140,11 @@ struct UpdateFeedBody {
     url: Option<String>,
 }
 
-async fn update_feed(State(s): State<AppState>, Path(id): Path<i64>, Json(b): Json<UpdateFeedBody>) -> AppResult<impl IntoResponse> {
+async fn update_feed(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    Json(b): Json<UpdateFeedBody>,
+) -> AppResult<impl IntoResponse> {
     let category_id = match b.category {
         Some(name) => Some(s.svc.store.ensure_category(Some(&name))?),
         None => b.category_id,
@@ -209,7 +217,11 @@ struct FlagsBody {
     starred: Option<bool>,
 }
 
-async fn update_article(State(s): State<AppState>, Path(id): Path<i64>, Json(b): Json<FlagsBody>) -> AppResult<impl IntoResponse> {
+async fn update_article(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    Json(b): Json<FlagsBody>,
+) -> AppResult<impl IntoResponse> {
     if s.svc.store.set_article_flags(&[id], b.read, b.starred)? == 0 {
         return Err(AppError::not_found(format!("Article {id} not found")));
     }
@@ -258,7 +270,10 @@ async fn get_settings(State(s): State<AppState>) -> AppResult<impl IntoResponse>
     Ok(Json(s.svc.store.get_settings()?))
 }
 
-async fn update_settings(State(s): State<AppState>, Json(patch): Json<serde_json::Map<String, Value>>) -> AppResult<impl IntoResponse> {
+async fn update_settings(
+    State(s): State<AppState>,
+    Json(patch): Json<serde_json::Map<String, Value>>,
+) -> AppResult<impl IntoResponse> {
     Ok(Json(s.svc.store.set_settings(&patch)?))
 }
 
@@ -271,7 +286,11 @@ async fn create_theme(State(s): State<AppState>, Json(mut t): Json<Theme>) -> Ap
     Ok((StatusCode::CREATED, Json(s.svc.store.save_theme(t)?)))
 }
 
-async fn update_theme(State(s): State<AppState>, Path(id): Path<i64>, Json(mut t): Json<Theme>) -> AppResult<impl IntoResponse> {
+async fn update_theme(
+    State(s): State<AppState>,
+    Path(id): Path<i64>,
+    Json(mut t): Json<Theme>,
+) -> AppResult<impl IntoResponse> {
     t.id = Some(id);
     Ok(Json(s.svc.store.save_theme(t)?))
 }

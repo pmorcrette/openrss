@@ -138,11 +138,11 @@ impl FeedService {
             let base = Url::parse(&page.final_url).map_err(|e| AppError::bad_request(e.to_string()))?;
             for path in ["/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/index.xml", "/feed.json", "/rss/"] {
                 let Ok(candidate) = base.join(path) else { continue };
-                if let Ok(FetchOutcome::Body(f)) = self.fetch(candidate.as_str(), None, None).await {
-                    if let Ok((meta, _)) = parse_feed(&f.body, &f.final_url) {
-                        found.push(DiscoveredFeed { url: f.final_url, title: non_empty(meta.title), kind: "feed".into() });
-                        break;
-                    }
+                if let Ok(FetchOutcome::Body(f)) = self.fetch(candidate.as_str(), None, None).await
+                    && let Ok((meta, _)) = parse_feed(&f.body, &f.final_url)
+                {
+                    found.push(DiscoveredFeed { url: f.final_url, title: non_empty(meta.title), kind: "feed".into() });
+                    break;
                 }
             }
         }
@@ -153,7 +153,12 @@ impl FeedService {
     }
 
     /// Subscribes to a feed (with auto-discovery) and imports its current entries.
-    pub async fn add_feed(&self, input: &str, category: Option<&str>, title: Option<&str>) -> AppResult<(Feed, UpsertCounts)> {
+    pub async fn add_feed(
+        &self,
+        input: &str,
+        category: Option<&str>,
+        title: Option<&str>,
+    ) -> AppResult<(Feed, UpsertCounts)> {
         let mut candidates = candidate_urls(input)?.into_iter().peekable();
         loop {
             let url = candidates.next().expect("at least one candidate");
@@ -164,7 +169,12 @@ impl FeedService {
         }
     }
 
-    async fn add_feed_url(&self, url: &str, category: Option<&str>, title: Option<&str>) -> AppResult<(Feed, UpsertCounts)> {
+    async fn add_feed_url(
+        &self,
+        url: &str,
+        category: Option<&str>,
+        title: Option<&str>,
+    ) -> AppResult<(Feed, UpsertCounts)> {
         let url = url.to_string();
         if let Some(existing) = self.store.find_feed_by_url(&url)? {
             return Err(AppError::conflict(format!("Already subscribed to {} (feed {})", existing.url, existing.id)));
@@ -293,7 +303,8 @@ impl FeedService {
                     let (feed, _) = self.add_feed(&e.url, e.category.as_deref(), None).await?;
                     // Keep a renamed subscription's name from the OPML file.
                     if let Some(t) = e.title.filter(|t| *t != feed.title) {
-                        self.store.update_feed(feed.id, crate::db::FeedUpdate { title: Some(t), ..Default::default() })?;
+                        self.store
+                            .update_feed(feed.id, crate::db::FeedUpdate { title: Some(t), ..Default::default() })?;
                     }
                     Ok(())
                 }
@@ -438,7 +449,7 @@ pub fn parse_feed(body: &[u8], url: &str) -> AppResult<(FeedMeta, Vec<NewArticle
                 .content
                 .as_ref()
                 .and_then(|c| c.body.clone())
-                .or_else(|| e.summary.as_ref().map(|s| text_as_html(s)))
+                .or_else(|| e.summary.as_ref().map(text_as_html))
                 .or_else(|| e.media.iter().find_map(|m| m.description.as_ref().map(text_as_html)))
                 .unwrap_or_default();
             let mut content = sanitize_html(&raw_html, &base);
@@ -533,11 +544,7 @@ fn text_as_html(t: &feed_rs::model::Text) -> String {
         t.content.clone()
     } else {
         // Plain text: preserve paragraphs.
-        t.content
-            .split("\n\n")
-            .map(|p| format!("<p>{}</p>", html_escape(p.trim())))
-            .collect::<Vec<_>>()
-            .join("")
+        t.content.split("\n\n").map(|p| format!("<p>{}</p>", html_escape(p.trim()))).collect::<Vec<_>>().join("")
     }
 }
 
@@ -552,10 +559,7 @@ fn media_player(media: &[feed_rs::model::MediaObject]) -> Option<String> {
         } else {
             return None;
         };
-        Some(format!(
-            r#"<{tag} controls preload="none" src="{}"></{tag}>"#,
-            html_escape(&url)
-        ))
+        Some(format!(r#"<{tag} controls preload="none" src="{}"></{tag}>"#, html_escape(&url)))
     })
 }
 
@@ -568,8 +572,23 @@ pub fn html_escape(s: &str) -> String {
 pub fn sanitize_html(html: &str, base: &str) -> String {
     let mut b = ammonia::Builder::default();
     b.add_tags([
-        "figure", "figcaption", "picture", "source", "audio", "video", "details", "summary", "mark", "time", "section",
-        "article", "aside", "header", "footer", "main", "nav",
+        "figure",
+        "figcaption",
+        "picture",
+        "source",
+        "audio",
+        "video",
+        "details",
+        "summary",
+        "mark",
+        "time",
+        "section",
+        "article",
+        "aside",
+        "header",
+        "footer",
+        "main",
+        "nav",
     ])
     .add_tag_attributes("img", ["src", "srcset", "sizes", "alt", "title", "width", "height"])
     .add_tag_attributes("source", ["src", "srcset", "type", "media", "sizes"])
@@ -598,7 +617,10 @@ pub fn plain_text(html: &str) -> String {
     }
     // Separate block elements with a space, but keep inline text (e.g. "<b>a</b>.") joined.
     static BLOCK: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"(?i)<(/?(p|div|br|li|ul|ol|h[1-6]|tr|td|th|blockquote|pre|figure|figcaption|section|article|hr)\b)").unwrap()
+        regex::Regex::new(
+            r"(?i)<(/?(p|div|br|li|ul|ol|h[1-6]|tr|td|th|blockquote|pre|figure|figcaption|section|article|hr)\b)",
+        )
+        .unwrap()
     });
     let spaced = BLOCK.replace_all(html, " <$1");
     let frag = Html::parse_fragment(&spaced);

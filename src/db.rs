@@ -375,10 +375,7 @@ impl Store {
     }
 
     pub fn find_category_by_name(&self, name: &str) -> AppResult<Option<i64>> {
-        Ok(self
-            .conn()
-            .query_row("SELECT id FROM categories WHERE name = ?", [name.trim()], |r| r.get(0))
-            .optional()?)
+        Ok(self.conn().query_row("SELECT id FROM categories WHERE name = ?", [name.trim()], |r| r.get(0)).optional()?)
     }
 
     /// Creates the category, or returns the existing one with the same name.
@@ -482,7 +479,13 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    pub fn insert_feed(&self, url: &str, meta: &FeedMeta, category_id: Option<i64>, custom_title: Option<&str>) -> AppResult<i64> {
+    pub fn insert_feed(
+        &self,
+        url: &str,
+        meta: &FeedMeta,
+        category_id: Option<i64>,
+        custom_title: Option<&str>,
+    ) -> AppResult<i64> {
         let c = self.conn();
         c.execute(
             r#"INSERT INTO feeds (url, title, site_url, description, category_id, custom_title, etag, last_modified, last_fetched_at, created_at)
@@ -506,10 +509,8 @@ impl Store {
         let feed = self.get_feed(id)?;
         if let Some(title) = update.title {
             let t = title.trim();
-            self.conn().execute(
-                "UPDATE feeds SET custom_title = ? WHERE id = ?",
-                params![(!t.is_empty()).then_some(t), id],
-            )?;
+            self.conn()
+                .execute("UPDATE feeds SET custom_title = ? WHERE id = ?", params![(!t.is_empty()).then_some(t), id])?;
         }
         if let Some(cat) = update.category_id {
             if let Some(cid) = cat {
@@ -595,15 +596,24 @@ impl Store {
             )?;
             let mut exists = tx.prepare_cached("SELECT 1 FROM articles WHERE feed_id = ? AND guid = ?")?;
             let mut fts_del = tx.prepare_cached("DELETE FROM articles_fts WHERE rowid = ?")?;
-            let mut fts_ins = tx.prepare_cached("INSERT INTO articles_fts (rowid, title, author, body) VALUES (?, ?, ?, ?)")?;
+            let mut fts_ins =
+                tx.prepare_cached("INSERT INTO articles_fts (rowid, title, author, body) VALUES (?, ?, ?, ?)")?;
             for it in items {
                 let published = it.published_at.clone().unwrap_or_else(|| fetched_at.clone());
                 let is_new = !exists.exists(params![feed_id, it.guid])?;
                 let id: Option<i64> = upsert
                     .query_row(
                         params![
-                            feed_id, it.guid, it.url, it.title, it.author, it.summary, it.content, it.image_url,
-                            published, fetched_at
+                            feed_id,
+                            it.guid,
+                            it.url,
+                            it.title,
+                            it.author,
+                            it.summary,
+                            it.content,
+                            it.image_url,
+                            published,
+                            fetched_at
                         ],
                         |r| r.get(0),
                     )
@@ -658,11 +668,10 @@ impl Store {
         let offset = q.offset.max(0);
 
         let c = self.conn();
-        let total: i64 = c.query_row(
-            &format!("SELECT COUNT(*) FROM {from} {where_sql}"),
-            params_from_iter(args.iter()),
-            |r| r.get(0),
-        )?;
+        let total: i64 =
+            c.query_row(&format!("SELECT COUNT(*) FROM {from} {where_sql}"), params_from_iter(args.iter()), |r| {
+                r.get(0)
+            })?;
         let sql = format!(
             "SELECT {ARTICLE_COLUMNS} FROM {from} {where_sql} ORDER BY a.published_at {dir}, a.id {dir} LIMIT {limit} OFFSET {offset}"
         );
@@ -710,7 +719,12 @@ impl Store {
     }
 
     /// Marks every unread article in scope as read. Returns how many changed.
-    pub fn mark_all_read(&self, feed_id: Option<i64>, category: Option<CategoryFilter>, before: Option<&str>) -> AppResult<usize> {
+    pub fn mark_all_read(
+        &self,
+        feed_id: Option<i64>,
+        category: Option<CategoryFilter>,
+        before: Option<&str>,
+    ) -> AppResult<usize> {
         let mut wheres = vec!["is_read = 0"];
         let mut args: Vec<Value> = Vec::new();
         if let Some(id) = feed_id {
@@ -722,7 +736,9 @@ impl Store {
                 wheres.push("feed_id IN (SELECT id FROM feeds WHERE category_id = ?)");
                 args.push(id.into());
             }
-            Some(CategoryFilter::Uncategorized) => wheres.push("feed_id IN (SELECT id FROM feeds WHERE category_id IS NULL)"),
+            Some(CategoryFilter::Uncategorized) => {
+                wheres.push("feed_id IN (SELECT id FROM feeds WHERE category_id IS NULL)")
+            }
             None => {}
         }
         if let Some(b) = before {
@@ -827,7 +843,11 @@ impl Store {
 
     pub fn get_theme(&self, id: i64) -> AppResult<Theme> {
         self.conn()
-            .query_row("SELECT id, name, base, vars, custom_css, created_at FROM themes WHERE id = ?", [id], theme_from_row)
+            .query_row(
+                "SELECT id, name, base, vars, custom_css, created_at FROM themes WHERE id = ?",
+                [id],
+                theme_from_row,
+            )
             .optional()?
             .ok_or_else(|| AppError::not_found(format!("Theme {id} not found")))
     }
@@ -915,7 +935,12 @@ mod tests {
         let cat = s.create_category("Tech").unwrap();
         assert_eq!(s.create_category(" tech ").unwrap().id, cat.id, "names are case-insensitive");
         let fid = s
-            .insert_feed("https://example.com/feed", &FeedMeta { title: "Example".into(), ..Default::default() }, Some(cat.id), None)
+            .insert_feed(
+                "https://example.com/feed",
+                &FeedMeta { title: "Example".into(), ..Default::default() },
+                Some(cat.id),
+                None,
+            )
             .unwrap();
         let counts = s
             .upsert_articles(
@@ -938,16 +963,19 @@ mod tests {
         assert_eq!(page.total, 2);
         assert_eq!(page.articles[0].title, "Café culture", "newest first");
 
-        let found = s.list_articles(&ArticleQuery { search: Some("cafe".into()), limit: 10, ..Default::default() }).unwrap();
+        let found =
+            s.list_articles(&ArticleQuery { search: Some("cafe".into()), limit: 10, ..Default::default() }).unwrap();
         assert_eq!(found.total, 1, "diacritics are ignored by search");
-        let found = s.list_articles(&ArticleQuery { search: Some("ver".into()), limit: 10, ..Default::default() }).unwrap();
+        let found =
+            s.list_articles(&ArticleQuery { search: Some("ver".into()), limit: 10, ..Default::default() }).unwrap();
         assert_eq!(found.total, 1, "prefix search");
 
         let id = page.articles[0].id;
         assert_eq!(s.set_article_flags(&[id, id, 9999], Some(true), Some(true)).unwrap(), 1);
         let a = s.get_article(id).unwrap();
         assert!(a.meta.is_read && a.meta.is_starred);
-        let unread = s.list_articles(&ArticleQuery { status: ReadStatus::Unread, limit: 10, ..Default::default() }).unwrap();
+        let unread =
+            s.list_articles(&ArticleQuery { status: ReadStatus::Unread, limit: 10, ..Default::default() }).unwrap();
         assert_eq!(unread.total, 1);
         assert_eq!(s.mark_all_read(None, Some(CategoryFilter::Id(cat.id)), None).unwrap(), 1);
         assert_eq!(s.stats().unwrap().unread, 0);
